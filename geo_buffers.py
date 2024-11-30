@@ -21,10 +21,12 @@
  *                                                                         *
  ***************************************************************************/
 """
+from .buffer_stats import BufferStatsDialog
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QVariant
-from qgis.core import Qgis, QgsVectorLayer, QgsFeature, QgsProject, QgsGeometry,QgsWkbTypes, QgsSymbol, QgsSimpleFillSymbolLayer, QgsField, QgsPalLayerSettings,QgsVectorLayerSimpleLabeling, QgsTextFormat, QgsCoordinateReferenceSystem 
+from qgis.core import Qgis, QgsVectorLayer, QgsFeature, QgsProject, QgsGeometry,QgsWkbTypes, QgsSymbol, QgsSimpleFillSymbolLayer, QgsField, QgsPalLayerSettings,QgsVectorLayerSimpleLabeling, QgsTextFormat, QgsCoordinateReferenceSystem, QgsPropertyCollection, QgsPalLayerSettings 
 from qgis.PyQt.QtGui import QIcon, QColor
 from qgis.PyQt.QtWidgets import QAction, QFileDialog
+from PyQt5.QtCore import Qt
 import psycopg2
 import processing
 
@@ -56,6 +58,7 @@ class BufferingClass:
         self.actions = []
         self.menu = self.tr(u'&GeoBuffers')
         self.first_start = None
+
 
     def tr(self, message):
         return QCoreApplication.translate('BufferingClass', message)
@@ -105,7 +108,7 @@ class BufferingClass:
                 action)
             self.iface.removeToolBarIcon(action)
 
-    def get_postgis_layer_names(self):
+    def get_db_connection(self):
         conn = psycopg2.connect(
             dbname='buffering_db',
             user='postgres',
@@ -113,7 +116,10 @@ class BufferingClass:
             host='localhost',
             port='5432'
         )
-        cursor = conn.cursor()
+        return conn
+
+    def get_postgis_layer_names(self):   
+        cursor= self.get_db_connection().cursor()
         cursor.execute("""
             SELECT table_name
             FROM information_schema.tables
@@ -121,8 +127,14 @@ class BufferingClass:
             AND table_name NOT IN ('spatial_ref_sys', 'geometry_columns', 'geography_columns');
         """)
         layers = [row[0] for row in cursor.fetchall()]
-        conn.close()
+        self.get_db_connection().close()
         return layers
+
+    def get_table(self, table_name):
+        cursor= self.get_db_connection().cursor()
+        cursor.execute(f"""
+            SELECT * from {table_name}
+           """)
 
     def get_file_input(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -146,18 +158,19 @@ class BufferingClass:
             # Get input values
             try:
                 base_distance = float(self.dlg.lineEdit_2.text())  # Base buffer distance
-                ring_count = int(self.dlg.lineEdit_3.text())  # Number of buffer rings
+                ring_count = int(self.dlg.spinBox.value())  # Number of buffer rings
             except ValueError:
                 self.iface.messageBar().pushMessage("Error", "Invalid input values", level=Qgis.Critical)
                 return
 
-            # Get the selected point layer from the comboBox
-            selected_point_layer_name = self.dlg.comboBox.currentText()
-            point_layer = QgsProject.instance().mapLayersByName(selected_point_layer_name)
-            if not point_layer:
-                self.iface.messageBar().pushMessage("Error", "Selected point layer not found", level=Qgis.Critical)
+            # Fetch the selected point layer from the database
+            selected_table_name = self.dlg.comboBox.currentText()
+            conn = self.get_db_connection()
+            uri = f"dbname='buffering_db' host='localhost' port='5432' user='postgres' password='' table=\"{selected_table_name}\" (geom)"
+            point_layer = QgsVectorLayer(uri, selected_table_name, "postgres")
+            if not point_layer.isValid():
+                self.iface.messageBar().pushMessage("Error", "Unable to load point layer from database", level=Qgis.Critical)
                 return
-            point_layer = point_layer[0]
 
             # Create a new memory layer for buffers
             buffer_layer = QgsVectorLayer("Polygon?crs=" + current_layer.crs().authid(),
@@ -168,6 +181,15 @@ class BufferingClass:
             buffer_provider.addAttributes(current_layer.fields())
             buffer_provider.addAttributes([QgsField("point_count", QVariant.Int)])
             buffer_layer.updateFields()
+
+            # Collect buffer data for statistics
+            buffer_statistics = []
+
+            # Calculate total points in the point layer
+            total_points = sum(1 for _ in point_layer.getFeatures())
+            if total_points == 0:
+                self.iface.messageBar().pushMessage("Error", "No points found in the selected point layer", level=Qgis.Critical)
+                return
 
             # Generate buffer rings for each selected feature
             for feature in current_layer.selectedFeatures():
@@ -187,6 +209,14 @@ class BufferingClass:
                     point_count = sum(1 for point in point_layer.getFeatures()
                                       if buffered_geom.contains(point.geometry()))
 
+                    percentage = (point_count / total_points) * 100 if total_points > 0 else 0
+
+                    buffer_statistics.append({
+                        'point_count': point_count,
+                        'percentage': percentage,
+                        'buffer_distance': buffer_distance
+                     })
+
                     # Create a new feature for this buffer
                     buffer_feature = QgsFeature(buffer_layer.fields())
                     buffer_feature.setGeometry(buffered_geom)
@@ -203,10 +233,11 @@ class BufferingClass:
             symbol = QgsSymbol.defaultSymbol(QgsWkbTypes.PolygonGeometry)
             symbol.setOpacity(0.5)
             buffer_layer.renderer().setSymbol(symbol)
-                    # Configure labels for the buffer layer
+
+            # Configure labels for the buffer layer
             label_settings = QgsPalLayerSettings()
-            label_settings.fieldName = "point_count"  # Use the 'point_count' field for labeling
-            label_settings.placement = QgsPalLayerSettings.OverPoint # Adjust as needed for placement
+            label_settings.fieldName = 'point_count'  # Use the 'point_count' field for labeling
+            label_settings.placement = QgsPalLayerSettings.OverPoint  # Adjust as needed for placement
 
             text_format = QgsTextFormat()
             text_format.setSize(14)  # Set the font size to 14 (adjust as needed)
@@ -215,8 +246,8 @@ class BufferingClass:
             # Set a white background for the label
             label_settings.backgroundEnabled = True
             label_settings.backgroundColor = QColor(255, 255, 255)  # White background
-            label_settings.backgroundOpacity = 0.5 
-            
+            label_settings.backgroundOpacity = 0.5
+
             label_settings.enabled = True
 
             labeler = QgsVectorLayerSimpleLabeling(label_settings)
@@ -226,7 +257,13 @@ class BufferingClass:
             buffer_layer.triggerRepaint()
             self.iface.zoomToActiveLayer()
 
+            # Show statistics dialog
+            stats_dialog = BufferStatsDialog(buffer_statistics)
+            stats_dialog.exec_()
+
         create_buffers()
+
+
 
     def run(self):
         if self.first_start:
@@ -237,6 +274,7 @@ class BufferingClass:
 
         layers = self.get_postgis_layer_names()
         self.dlg.comboBox.addItems(layers)
+        self.dlg.comboBox_2.addItems(layers)
         self.dlg.show()
         result = self.dlg.exec_()
         if result:
