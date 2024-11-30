@@ -377,6 +377,7 @@ class BufferingClass:
 
         layers = self.get_postgis_layer_names()
         self.dlg.comboBox.addItems(layers)
+        self.dlg.comboBox_2.addItem("")
         self.dlg.comboBox_2.addItems(layers)
         self.dlg.show()
         result = self.dlg.exec_()
