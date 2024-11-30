@@ -264,6 +264,25 @@ class BufferingClass:
         create_buffers()
 
 
+    def toggle_widgets(self):
+        """Toggle the enabled/disabled state of widgets based on the checkbox state."""
+        if self.dlg.checkBox.isChecked():
+            # Disable label_2, lineEdit, and pushButton
+            self.dlg.label_2.setEnabled(False)
+            self.dlg.lineEdit.setEnabled(False)
+            self.dlg.pushButton.setEnabled(False)
+
+            # Enable comboBox_2
+            self.dlg.comboBox_2.setEnabled(True)
+        else:
+            # Enable label_2, lineEdit, and pushButton
+            self.dlg.label_2.setEnabled(True)
+            self.dlg.lineEdit.setEnabled(True)
+            self.dlg.pushButton.setEnabled(True)
+
+            # Disable comboBox_2
+            self.dlg.comboBox_2.setEnabled(False)
+
 
     def run(self):
         if self.first_start:
@@ -271,6 +290,7 @@ class BufferingClass:
             self.dlg = BufferingClassDialog()
             self.dlg.pushButton.clicked.connect(self.get_file_input)
             self.dlg.button_box.clicked.connect(self.generate_buffers)
+            self.dlg.checkBox.stateChanged.connect(self.toggle_widgets)
 
         layers = self.get_postgis_layer_names()
         self.dlg.comboBox.addItems(layers)
