@@ -284,6 +284,78 @@ class BufferingClass:
             self.dlg.comboBox_2.setEnabled(False)
 
 
+    def load_database_layer(self, table_name):
+        """Load a layer from the specified database table."""
+        if not table_name:
+            return
+        # Construct the connection URI for the PostGIS layer
+        #conn_info = self.get_db_connection()
+        uri = f"dbname='buffering_db' host='localhost' port='5432' user='postgres' password='' table=\"{table_name}\" (geom)"
+        
+        # Create the vector layer
+        point_layer = QgsVectorLayer(uri, table_name, "postgres")
+        
+        # Check if the layer is valid
+        if not point_layer.isValid():
+            self.iface.messageBar().pushMessage("Error", f"Unable to load layer {table_name}", level=Qgis.Critical)
+            return
+        
+        # Add the layer to the project
+        QgsProject.instance().addMapLayer(point_layer)
+        
+        # Set the layer as active
+        self.iface.setActiveLayer(point_layer)
+        
+        # Zoom to the layer
+        self.iface.zoomToActiveLayer()
+
+    def load_file_layer(self, file_path):
+        """Load a layer from the specified file path."""
+        if not file_path or not os.path.exists(file_path):
+            return
+        # Determine the layer type based on file extension
+        file_ext = os.path.splitext(file_path)[1].lower()
+        
+        # Supported file types and their corresponding provider
+        file_types = {
+            '.shp': 'ogr',
+            '.csv': 'delimitedtext',
+            '.gpx': 'ogr',
+            '.geojson': 'ogr',
+            '.kml': 'ogr',
+            '.txt': 'delimitedtext'
+        }
+        
+        # Get the appropriate provider
+        provider = file_types.get(file_ext)
+        
+        if not provider:
+            self.iface.messageBar().pushMessage("Error", f"Unsupported file type: {file_ext}", level=Qgis.Critical)
+            return
+        # Construct the layer URI
+        if provider == 'delimitedtext':
+            # Special handling for delimited text files
+            uri = f"file:///{file_path}?type=csv&decimalPoint=.&xField=longitude&yField=latitude&crs=EPSG:4326"
+        else:
+            # Generic OGR provider URI
+            uri = file_path
+        # Create the vector layer
+        layer_name = os.path.splitext(os.path.basename(file_path))[0]
+        file_layer = QgsVectorLayer(uri, layer_name, provider)
+        # Check if the layer is valid
+        if not file_layer.isValid():
+            self.iface.messageBar().pushMessage("Error", f"Unable to load layer {layer_name}", level=Qgis.Critical)
+            return
+        # Add the layer to the project
+        QgsProject.instance().addMapLayer(file_layer)
+        
+        # Set the layer as active
+        self.iface.setActiveLayer(file_layer)
+        
+        # Zoom to the layer
+        self.iface.zoomToActiveLayer()
+
+
     def run(self):
         if self.first_start:
             self.first_start = False
@@ -291,6 +363,17 @@ class BufferingClass:
             self.dlg.pushButton.clicked.connect(self.get_file_input)
             self.dlg.button_box.clicked.connect(self.generate_buffers)
             self.dlg.checkBox.stateChanged.connect(self.toggle_widgets)
+            self.dlg.comboBox_2.currentTextChanged.connect(self.load_database_layer)
+            self.dlg.lineEdit.textChanged.connect(self.load_file_layer)
+
+                    # Clear previous items
+        self.dlg.comboBox.clear()
+        self.dlg.comboBox_2.clear()
+        self.dlg.lineEdit.clear()
+        self.dlg.lineEdit_2.clear()
+        self.dlg.spinBox.setValue(1)  # Reset to default value
+        self.dlg.checkBox.setChecked(False)  # Uncheck the checkbox
+
 
         layers = self.get_postgis_layer_names()
         self.dlg.comboBox.addItems(layers)
