@@ -145,6 +145,7 @@ class BufferingClass:
         )
         if file_path:
             self.dlg.lineEdit.setText(file_path)
+            self.load_file_layer(file_path)
         else:
             print("No file selected")
 
@@ -364,7 +365,7 @@ class BufferingClass:
             self.dlg.button_box.clicked.connect(self.generate_buffers)
             self.dlg.checkBox.stateChanged.connect(self.toggle_widgets)
             self.dlg.comboBox_2.currentTextChanged.connect(self.load_database_layer)
-            self.dlg.lineEdit.textChanged.connect(self.load_file_layer)
+            #self.dlg.lineEdit.textChanged.connect(self.load_file_layer)
 
                     # Clear previous items
         self.dlg.comboBox.clear()
